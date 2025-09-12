@@ -5,10 +5,34 @@ RWTexture2D<float4> Result;
 float4x4 _CameraToWorld;
 float4x4 _CameraInverseProjection;
 
+static const float EPSILON = 1e-8;
+
+//-------------------------------------
+// MESHES
+struct MeshObject
+{
+    float4x4 localToWorldMatrix;
+    int indices_offset;
+    int indices_count;
+};
+
+StructuredBuffer<MeshObject> _MeshObjects;
+StructuredBuffer<float3> _Vertices;
+StructuredBuffer<int> _Indices;
+
+//-------------------------------------
+// RAYS
 struct Ray
 {
     float3 origin;
     float3 direction;
+};
+
+struct HitInfo
+{
+    float3 position;
+    float distance;
+    float3 normal;
 };
 
 Ray CreateRay(float3 origin, float3 direction)
@@ -17,6 +41,15 @@ Ray CreateRay(float3 origin, float3 direction)
     ray.origin = origin;
     ray.direction = direction;
     return ray;
+}
+
+HitInfo CreateRayHit()
+{
+    HitInfo hitInfo;
+    hitInfo.position = float3(0.0f, 0.0f, 0.0f);
+    hitInfo.distance = 1.#INF;
+    hitInfo.normal = float3(0.0f, 0.0f, 0.0f);
+    return hitInfo;
 }
 
 Ray CreateRayFromCamera(float2 uv)
@@ -34,6 +67,108 @@ Ray CreateRayFromCamera(float2 uv)
     return CreateRay(origin, direction);
 }
 
+//-------------------------------------
+// INTERSECTS
+// Algorithm from Tomas Moller & Ben Trumbore 1997
+bool IntersectTriangle_MT97(Ray ray, float3 vert0, float3 vert1, float3 vert2,
+    inout float t, inout float u, inout float v)
+{
+    // find vectors for two edges sharing vert0
+    float3 edge1 = vert1 - vert0;
+    float3 edge2 = vert2 - vert0;
+
+    // begin calculating determinant - also used to calculate U parameter
+    float3 pvec = cross(ray.direction, edge2);
+
+    // if determinant is near zero, ray lies in plane of triangle
+    float det = dot(edge1, pvec);
+
+    // use backface culling
+    if (det < EPSILON)
+        return false;
+    float inv_det = 1.0f / det;
+
+    // calculate distance from vert0 to ray origin
+    float3 tvec = ray.origin - vert0;
+
+    // calculate U parameter and test bounds
+    u = dot(tvec, pvec) * inv_det;
+    if (u < 0.0 || u > 1.0f)
+        return false;
+
+    // prepare to test V parameter
+    float3 qvec = cross(tvec, edge1);
+
+    // calculate V parameter and test bounds
+    v = dot(ray.direction, qvec) * inv_det;
+    if (v < 0.0 || u + v > 1.0f)
+        return false;
+
+    // calculate t, ray intersects triangle
+    t = dot(edge2, qvec) * inv_det;
+
+    return true;
+}
+
+void IntersectMeshObject(Ray ray, inout HitInfo bestHit, MeshObject meshObject)
+{
+    uint offset = meshObject.indices_offset;
+    uint count = offset + meshObject.indices_count;
+    for (uint i = offset; i < count; i += 3)
+    {
+        float3 v0 = (mul(meshObject.localToWorldMatrix, float4(_Vertices[_Indices[i]], 1))).xyz;
+        float3 v1 = (mul(meshObject.localToWorldMatrix, float4(_Vertices[_Indices[i + 1]], 1))).xyz;
+        float3 v2 = (mul(meshObject.localToWorldMatrix, float4(_Vertices[_Indices[i + 2]], 1))).xyz;
+
+        float t, u, v;
+        if (IntersectTriangle_MT97(ray, v0, v1, v2, t, u, v))
+        {
+            if (t > 0 && t < bestHit.distance)
+            {
+                bestHit.distance = t;
+                bestHit.position = ray.origin + t * ray.direction;
+                bestHit.normal = normalize(cross(v1 - v0, v2 - v0));
+            }
+        }
+    }
+}
+
+//-------------------------------------
+// TRACE
+HitInfo Trace(Ray ray)
+{
+    HitInfo bestHit = CreateRayHit();
+    uint count, stride, i;
+
+    // Trace Mesh Objects
+    _MeshObjects.GetDimensions(count, stride);
+    for (i = 0; i < count; i++)
+    {
+        IntersectMeshObject(ray, bestHit, _MeshObjects[i]);
+    }
+    
+    return bestHit;
+}
+
+//-------------------------------------
+// SHADE
+float3 Shade(inout Ray ray, HitInfo hitInfo)
+{
+    if (hitInfo.distance < 1.#INF)
+    {
+        // Return the normal
+        return hitInfo.normal * 0.5f + 0.5f;
+    }
+    else
+    {
+        // Return the sky
+        return float4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
+}
+
+
+//-------------------------------------
+// MAIN
 [numthreads(8,8,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
 {
@@ -48,5 +183,7 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     Ray ray = CreateRayFromCamera(uv);
 
     // The result
-    Result[id.xy] = float4(ray.direction * 0.5f + 0.5f, 1.0f);
+    HitInfo hitInfo = Trace(ray);
+    float3 result = Shade(ray, hitInfo);
+    Result[id.xy] = float4(result, 1);
 }
