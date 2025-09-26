@@ -7,6 +7,41 @@ float4x4 _CameraInverseProjection;
 
 static const float EPSILON = 1e-8;
 
+int MaxBounceCount;
+int frame;
+
+//-------------------------------------
+// RNG - Cosine Weighted Hemisphere Sampling
+// PCG (permuted congruential generator) - www.pcg-random.org
+// Huge thanks to SebLague
+uint NextRandom(inout uint rngSeed)
+{
+    rngSeed = rngSeed * 747796405 + 2891336453;
+    uint result = ((rngSeed >> ((rngSeed >> 28) + 4)) ^ rngSeed) * 277803737;
+    result = (result >> 22) ^ result;
+    return result;
+}
+
+float RandomValue(inout uint rngSeed)
+{
+    return NextRandom(rngSeed) / 4294967295.0; // 2^32 - 1
+}
+
+float RandomValueNormalDistribution(inout uint rngSeed)
+{
+    float theta = 2 * 3.1415926 * RandomValue(rngSeed);
+    float rho = sqrt(-2 * log(RandomValue(rngSeed)));
+    return rho * cos(theta);
+}
+
+float3 RandomDirection(inout uint rngSeed)
+{
+    float x = RandomValueNormalDistribution(rngSeed);
+    float y = RandomValueNormalDistribution(rngSeed);
+    float z = RandomValueNormalDistribution(rngSeed);
+    return normalize(float3(x, y, z));
+}
+
 //-------------------------------------
 // MESHES
 struct MeshObject
@@ -26,6 +61,7 @@ struct Ray
 {
     float3 origin;
     float3 direction;
+    float3 energy;
 };
 
 struct HitInfo
@@ -40,6 +76,7 @@ Ray CreateRay(float3 origin, float3 direction)
     Ray ray;
     ray.origin = origin;
     ray.direction = direction;
+    ray.energy = float3(1.0f, 1.0f, 1.0f);
     return ray;
 }
 
@@ -110,7 +147,7 @@ bool IntersectTriangle_MT97(Ray ray, float3 vert0, float3 vert1, float3 vert2,
     return true;
 }
 
-void IntersectMeshObject(Ray ray, inout HitInfo bestHit, MeshObject meshObject)
+void IntersectMeshObject(Ray ray, inout HitInfo hitInfo, MeshObject meshObject)
 {
     uint offset = meshObject.indices_offset;
     uint count = offset + meshObject.indices_count;
@@ -123,11 +160,11 @@ void IntersectMeshObject(Ray ray, inout HitInfo bestHit, MeshObject meshObject)
         float t, u, v;
         if (IntersectTriangle_MT97(ray, v0, v1, v2, t, u, v))
         {
-            if (t > 0 && t < bestHit.distance)
+            if (t > 0 && t < hitInfo.distance)
             {
-                bestHit.distance = t;
-                bestHit.position = ray.origin + t * ray.direction;
-                bestHit.normal = normalize(cross(v1 - v0, v2 - v0));
+                hitInfo.distance = t;
+                hitInfo.position = ray.origin + t * ray.direction;
+                hitInfo.normal = normalize(cross(v1 - v0, v2 - v0));
             }
         }
     }
@@ -152,20 +189,28 @@ HitInfo Trace(Ray ray)
 
 //-------------------------------------
 // SHADE
-float3 Shade(inout Ray ray, HitInfo hitInfo)
+float3 Shade(inout Ray ray, HitInfo hitInfo, inout uint rngSeed)
 {
     if (hitInfo.distance < 1.#INF)
     {
-        // Return the normal
-        return hitInfo.normal * 0.5f + 0.5f;
+        float3 specular = float3(0.6f, 0.6f, 0.6f);
+
+        // Bounce the ray and multiply the light with specular
+        ray.origin = hitInfo.position + hitInfo.normal * 0.001f;
+        ray.direction = normalize(hitInfo.normal + RandomDirection(rngSeed));
+        ray.energy *= specular;
+
+        return float3(0.0f, 0.0f, 0.0f);
     }
     else
     {
+        // It hit nothing so delete the ray's energy
+        ray.energy = 0.0f;
+
         // Return the sky
-        return float4(0.0f, 0.0f, 0.0f, 0.0f);
+        return float4(1.0f, 1.0f, 1.0f, 0.0f);
     }
 }
-
 
 //-------------------------------------
 // MAIN
@@ -182,8 +227,24 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     // Create the ray
     Ray ray = CreateRayFromCamera(uv);
 
+    // Creating a seed for rng
+    // Credit to SabLague
+    uint2 pixelCount = float2(width, height);
+    uint2 pixelCoord = id.xy * pixelCount;
+    uint pixelIndex = pixelCoord.y * pixelCount.x + pixelCoord.x;
+    uint rngSeed = pixelIndex + frame * 719393;
+
     // The result
-    HitInfo hitInfo = Trace(ray);
-    float3 result = Shade(ray, hitInfo);
+    float3 result = float3(0.0f, 0.0f, 0.0f);
+    for (int i = 0; i < MaxBounceCount; i++)
+    {
+        HitInfo hitInfo = Trace(ray);
+        result += ray.energy * Shade(ray, hitInfo, rngSeed);
+
+        if (!any(ray.energy))
+        {
+            break;
+        }
+    }
     Result[id.xy] = float4(result, 1);
 }

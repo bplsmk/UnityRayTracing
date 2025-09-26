@@ -2,12 +2,14 @@ using UnityEngine;
 using System.Linq;
 using System.Collections.Generic;
 
-[ExecuteAlways, ImageEffectAllowedInSceneView]
 public class raytracer : MonoBehaviour
 {
-    [Header("View Settings")]
-	[SerializeField] bool useShaderInSceneView;
-    
+    [Header("Ray Tracing Settings")]
+    [SerializeField, Range(0, 32)] int maxBounceCount = 4;
+
+    [Header("Info")]
+	[SerializeField] int numRenderedFrames;
+
     public ComputeShader RayTracingShader;
 
     private RenderTexture _target;
@@ -136,12 +138,17 @@ public class raytracer : MonoBehaviour
     // Grabbing the already calculated matrices from Unity to our shader
     private void SetShaderParameters()
     {
+        RayTracingShader.SetInt("MaxBounceCount", maxBounceCount);
+        RayTracingShader.SetInt("frame", numRenderedFrames);
+
         RayTracingShader.SetMatrix("_CameraToWorld", _camera.cameraToWorldMatrix);
         RayTracingShader.SetMatrix("_CameraInverseProjection", _camera.projectionMatrix.inverse);
 
         SetComputeBuffer("_MeshObjects", _meshObjectBuffer);
         SetComputeBuffer("_Vertices", _vertexBuffer);
         SetComputeBuffer("_Indices", _indexBuffer);
+
+        numRenderedFrames += Application.isPlaying ? 1 : 0;
     }
 
     private void InitRenderTexture()
@@ -162,6 +169,19 @@ public class raytracer : MonoBehaviour
         }
     }
 
+    void Update()
+    {
+        // Checking if obj has moved
+        foreach (raytracingobject obj in _rayTracingObjects)
+        {
+            if (obj.transform.hasChanged)
+            {
+                //WORK HERE NOW PLEASE UPDATE THE OBJECT MATRIX HERE
+                obj.transform.hasChanged = false;
+            }
+        }
+    }
+
     private void Render(RenderTexture destination)
     {
         // Make sure we have a current render target
@@ -175,16 +195,7 @@ public class raytracer : MonoBehaviour
         RayTracingShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
 
         // Run the shader, then draw the result to the screen
-        // If the button is on, raytrace in scene view, else render normally
-        if (useShaderInSceneView)
-        {
-            Graphics.Blit(_target, destination);
-        }
-        else
-        {
-            Graphics.Blit(null, destination);
-        }
-
+        Graphics.Blit(_target, destination);
     }
     
     // OnRenderImage is automatically called by Unity when camera has finished rendering
