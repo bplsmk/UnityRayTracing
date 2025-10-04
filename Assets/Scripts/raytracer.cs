@@ -14,7 +14,6 @@ public class raytracer : MonoBehaviour
 
     private RenderTexture _target;
     private Camera _camera;
-    private uint _currentSample = 0;
     private static bool _meshObjectsNeedRebuilding = false;
     private static List<raytracingobject> _rayTracingObjects = new List<raytracingobject>();
     private static List<MeshObject> _meshObjects = new List<MeshObject>();
@@ -29,6 +28,7 @@ public class raytracer : MonoBehaviour
         public Matrix4x4 localToWorldMatrix;
         public int indices_offset;
         public int indices_count;
+        public RTmaterial material;
     }
 
     private void Awake()
@@ -63,7 +63,6 @@ public class raytracer : MonoBehaviour
         }
 
         _meshObjectsNeedRebuilding = false;
-        _currentSample = 0;
 
         // Clear all lists
         _meshObjects.Clear();
@@ -90,11 +89,12 @@ public class raytracer : MonoBehaviour
             {
                 localToWorldMatrix = obj.transform.localToWorldMatrix,
                 indices_offset = firstIndex,
-                indices_count = indices.Length
+                indices_count = indices.Length,
+                material = obj.material
             });
         }
 
-        CreateComputeBuffer(ref _meshObjectBuffer, _meshObjects, 72);
+        CreateComputeBuffer(ref _meshObjectBuffer, _meshObjects, 92);
         CreateComputeBuffer(ref _vertexBuffer, _vertices, 12);
         CreateComputeBuffer(ref _indexBuffer, _indices, 4);
     }
@@ -102,7 +102,6 @@ public class raytracer : MonoBehaviour
     private static void CreateComputeBuffer<T>(ref ComputeBuffer buffer, List<T> data, int stride)
         where T : struct
     {
-        // Do we already have a compute buffer?
         if (buffer != null)
         {
             // If no data or buffer doesn't match the given criteria, release it
@@ -115,14 +114,11 @@ public class raytracer : MonoBehaviour
 
         if (data.Count != 0)
         {
-            // If the buffer has been released or wasn't there to
-            // begin with, create it
             if (buffer == null)
             {
                 buffer = new ComputeBuffer(data.Count, stride);
             }
 
-            // Set data on the buffer
             buffer.SetData(data);
         }
     }
@@ -176,7 +172,7 @@ public class raytracer : MonoBehaviour
         {
             if (obj.transform.hasChanged)
             {
-                //WORK HERE NOW PLEASE UPDATE THE OBJECT MATRIX HERE
+                _meshObjectsNeedRebuilding = true;
                 obj.transform.hasChanged = false;
             }
         }

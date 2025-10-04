@@ -43,12 +43,21 @@ float3 RandomDirection(inout uint rngSeed)
 }
 
 //-------------------------------------
+// MATERIALS
+struct RTmaterial
+{
+    float emissionStrength;
+    float4 emissionColor;
+};
+
+//-------------------------------------
 // MESHES
 struct MeshObject
 {
     float4x4 localToWorldMatrix;
     int indices_offset;
     int indices_count;
+    RTmaterial emission;
 };
 
 StructuredBuffer<MeshObject> _MeshObjects;
@@ -69,6 +78,7 @@ struct HitInfo
     float3 position;
     float distance;
     float3 normal;
+    RTmaterial emission;
 };
 
 Ray CreateRay(float3 origin, float3 direction)
@@ -86,6 +96,7 @@ HitInfo CreateRayHit()
     hitInfo.position = float3(0.0f, 0.0f, 0.0f);
     hitInfo.distance = 1.#INF;
     hitInfo.normal = float3(0.0f, 0.0f, 0.0f);
+    hitInfo.emission = (RTmaterial)0;
     return hitInfo;
 }
 
@@ -165,6 +176,7 @@ void IntersectMeshObject(Ray ray, inout HitInfo hitInfo, MeshObject meshObject)
                 hitInfo.distance = t;
                 hitInfo.position = ray.origin + t * ray.direction;
                 hitInfo.normal = normalize(cross(v1 - v0, v2 - v0));
+                hitInfo.emission = meshObject.emission;
             }
         }
     }
@@ -188,40 +200,15 @@ HitInfo Trace(Ray ray)
 }
 
 //-------------------------------------
-// SHADE
-float3 Shade(inout Ray ray, HitInfo hitInfo, inout uint rngSeed)
-{
-    if (hitInfo.distance < 1.#INF)
-    {
-        float3 specular = float3(0.6f, 0.6f, 0.6f);
-
-        // Bounce the ray and multiply the light with specular
-        ray.origin = hitInfo.position + hitInfo.normal * 0.001f;
-        ray.direction = normalize(hitInfo.normal + RandomDirection(rngSeed));
-        ray.energy *= specular;
-
-        return float3(0.0f, 0.0f, 0.0f);
-    }
-    else
-    {
-        // It hit nothing so delete the ray's energy
-        ray.energy = 0.0f;
-
-        // Return the sky
-        return float4(1.0f, 1.0f, 1.0f, 0.0f);
-    }
-}
-
-//-------------------------------------
 // MAIN
 [numthreads(8,8,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
 {
-    // Get dimensions of RenderTexture
+    // Get dimensions of RenderTexture (ie, the screen dimensions)
     uint width, height;
     Result.GetDimensions(width, height);
 
-    // Normalizing pixel range (transforming it to [-1,1] range)
+    // Transforming pixel range to [-1,1])
     float2 uv = float2((id.xy + float2(0.5f, 0.5f)) / float2(width, height) * 2.0f - 1.0f);
 
     // Create the ray
@@ -239,10 +226,21 @@ void CSMain (uint3 id : SV_DispatchThreadID)
     for (int i = 0; i < MaxBounceCount; i++)
     {
         HitInfo hitInfo = Trace(ray);
-        result += ray.energy * Shade(ray, hitInfo, rngSeed);
-
-        if (!any(ray.energy))
+        if (hitInfo.distance < 1.#INF)
         {
+            // Grab the incoming light if it bounces from an object with emission values
+            float3 incomingLight = hitInfo.emission.emissionColor.rgb * hitInfo.emission.emissionStrength;
+
+            // Bounce the ray and multiply the light with object color (right now its just white)
+            ray.origin = hitInfo.position + hitInfo.normal * 0.001f;
+            ray.direction = normalize(hitInfo.normal + RandomDirection(rngSeed));
+            result += incomingLight * ray.energy;
+            ray.energy *= float3(1.0f, 1.0f, 1.0f);
+        }
+        else
+        {
+            // It hit nothing so delete the ray's energy
+            ray.energy = 0.0f;
             break;
         }
     }
