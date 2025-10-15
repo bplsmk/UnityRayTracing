@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using System.Linq;
 using System.Collections.Generic;
 
@@ -158,8 +159,7 @@ public class raytracer : MonoBehaviour
             }
 
             // Get a render target for Ray Tracing
-            _target = new RenderTexture(Screen.width, Screen.height, 0,
-                RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
+            _target = new RenderTexture(Screen.width, Screen.height, 0, GraphicsFormat.R32G32B32A32_SFloat);
             _target.enableRandomWrite = true;
             _target.Create();
         }
