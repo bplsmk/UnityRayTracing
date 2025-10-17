@@ -244,8 +244,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::raytracingobject
   material:
-    emissionColor: {r: 1, g: 1, b: 1, a: 0}
-    emissionStrength: 2
+    emissionColor: {r: 0, g: 0, b: 0, a: 0}
+    emissionStrength: 0
 --- !u!1 &26472154
 GameObject:
   m_ObjectHideFlags: 0
@@ -406,7 +406,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::raytracingobject
   material:
-    emissionColor: {r: 0, g: 0, b: 0, a: 0}
+    emissionColor: {r: 1, g: 0, b: 0, a: 1}
     emissionStrength: 0
 --- !u!65 &37318243
 BoxCollider:
@@ -1011,7 +1011,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::raytracingobject
   material:
-    emissionColor: {r: 0, g: 0, b: 0, a: 0}
+    emissionColor: {r: 1, g: 1, b: 1, a: 1}
     emissionStrength: 0
 --- !u!65 &1305694786
 BoxCollider:
@@ -1137,8 +1137,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::raytracer
   maxBounceCount: 4
+  Accumulate: 1
   numRenderedFrames: 0
   RayTracingShader: {fileID: 7200000, guid: 8585c1e516f766e47aa5d89cb1702a84, type: 3}
+  AccumulationShader: {fileID: 7200000, guid: 88525a9b4ebc2bf408da258dbd8dec1a, type: 3}
 --- !u!81 &1734595535
 AudioListener:
   m_ObjectHideFlags: 0

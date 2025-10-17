@@ -70,7 +70,7 @@ struct Ray
 {
     float3 origin;
     float3 direction;
-    float3 energy;
+    float3 color;
 };
 
 struct HitInfo
@@ -86,7 +86,7 @@ Ray CreateRay(float3 origin, float3 direction)
     Ray ray;
     ray.origin = origin;
     ray.direction = direction;
-    ray.energy = float3(1.0f, 1.0f, 1.0f);
+    ray.color = float3(1.0f, 1.0f, 1.0f);
     return ray;
 }
 
@@ -121,38 +121,30 @@ Ray CreateRayFromCamera(float2 uv)
 bool IntersectTriangle_MT97(Ray ray, float3 vert0, float3 vert1, float3 vert2,
     inout float t, inout float u, inout float v)
 {
-    // find vectors for two edges sharing vert0
+
     float3 edge1 = vert1 - vert0;
     float3 edge2 = vert2 - vert0;
 
-    // begin calculating determinant - also used to calculate U parameter
     float3 pvec = cross(ray.direction, edge2);
 
-    // if determinant is near zero, ray lies in plane of triangle
     float det = dot(edge1, pvec);
 
-    // use backface culling
     if (det < EPSILON)
         return false;
     float inv_det = 1.0f / det;
 
-    // calculate distance from vert0 to ray origin
     float3 tvec = ray.origin - vert0;
 
-    // calculate U parameter and test bounds
     u = dot(tvec, pvec) * inv_det;
     if (u < 0.0 || u > 1.0f)
         return false;
 
-    // prepare to test V parameter
     float3 qvec = cross(tvec, edge1);
 
-    // calculate V parameter and test bounds
     v = dot(ray.direction, qvec) * inv_det;
     if (v < 0.0 || u + v > 1.0f)
         return false;
 
-    // calculate t, ray intersects triangle
     t = dot(edge2, qvec) * inv_det;
 
     return true;
@@ -229,18 +221,18 @@ void CSMain (uint3 id : SV_DispatchThreadID)
         if (hitInfo.distance < 1.#INF)
         {
             // Grab the incoming light if it bounces from an object with emission values
-            float3 incomingLight = hitInfo.emission.emissionColor.rgb * hitInfo.emission.emissionStrength;
+            float3 incomingLight = hitInfo.emission.emissionColor.gba;
 
             // Bounce the ray and multiply the light with object color (right now its just white)
             ray.origin = hitInfo.position + hitInfo.normal * 0.001f;
             ray.direction = normalize(hitInfo.normal + RandomDirection(rngSeed));
-            result += incomingLight * ray.energy;
-            ray.energy *= float3(1.0f, 1.0f, 1.0f);
+            result += incomingLight * ray.color;
+            ray.color *= float3(1.0f, 1.0f, 1.0f);
         }
         else
         {
-            // It hit nothing so delete the ray's energy
-            ray.energy = 0.0f;
+            // It hit nothing so delete the ray's color
+            ray.color = float3(0.0f, 0.0f, 0.0f);
             break;
         }
     }

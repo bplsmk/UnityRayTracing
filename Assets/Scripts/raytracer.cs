@@ -7,11 +7,13 @@ public class raytracer : MonoBehaviour
 {
     [Header("Ray Tracing Settings")]
     [SerializeField, Range(0, 32)] int maxBounceCount = 4;
+    [SerializeField] bool Accumulate;
 
     [Header("Info")]
 	[SerializeField] int numRenderedFrames;
 
     public ComputeShader RayTracingShader;
+    public ComputeShader AccumulationShader;
 
     private RenderTexture _target;
     private Camera _camera;
@@ -136,7 +138,6 @@ public class raytracer : MonoBehaviour
     private void SetShaderParameters()
     {
         RayTracingShader.SetInt("MaxBounceCount", maxBounceCount);
-        RayTracingShader.SetInt("frame", numRenderedFrames);
 
         RayTracingShader.SetMatrix("_CameraToWorld", _camera.cameraToWorldMatrix);
         RayTracingShader.SetMatrix("_CameraInverseProjection", _camera.projectionMatrix.inverse);
@@ -144,25 +145,6 @@ public class raytracer : MonoBehaviour
         SetComputeBuffer("_MeshObjects", _meshObjectBuffer);
         SetComputeBuffer("_Vertices", _vertexBuffer);
         SetComputeBuffer("_Indices", _indexBuffer);
-
-        numRenderedFrames += Application.isPlaying ? 1 : 0;
-    }
-
-    private void InitRenderTexture()
-    {
-        if (_target == null || _target.width != Screen.width || _target.height != Screen.height)
-        {
-            // Release render texture if we already have one
-            if (_target != null)
-            {
-                _target.Release();
-            }
-
-            // Get a render target for Ray Tracing
-            _target = new RenderTexture(Screen.width, Screen.height, 0, GraphicsFormat.R32G32B32A32_SFloat);
-            _target.enableRandomWrite = true;
-            _target.Create();
-        }
     }
 
     void Update()
@@ -178,20 +160,71 @@ public class raytracer : MonoBehaviour
         }
     }
 
+    private void InitRenderTexture()
+    {
+        if (_target == null || _target.width != Screen.width || _target.height != Screen.height)
+        {
+            // Get a render target for Ray Tracing
+            _target = new RenderTexture(Screen.width, Screen.height, 0, GraphicsFormat.R32G32B32A32_SFloat);
+            _target.enableRandomWrite = true;
+            _target.Create();
+        }
+    }
+
     private void Render(RenderTexture destination)
     {
-        // Make sure we have a current render target
+        // Create the initial frame
         InitRenderTexture();
 
-        // Set the target and dispatch the compute shader
-        // One thread per pixel, 1 group per 8x8 pixel
-        RayTracingShader.SetTexture(0, "Result", _target);
         int threadGroupsX = Mathf.CeilToInt(Screen.width / 8.0f);
         int threadGroupsY = Mathf.CeilToInt(Screen.height / 8.0f);
-        RayTracingShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
 
-        // Run the shader, then draw the result to the screen
-        Graphics.Blit(_target, destination);
+        if(Accumulate == true)
+        {
+            // Create a copy of previous frame
+            RenderTexture previousFrame = RenderTexture.GetTemporary(Screen.width, Screen.height, 0, GraphicsFormat.R32G32B32A32_SFloat);
+            previousFrame.enableRandomWrite = true;
+            previousFrame.Create();
+            Graphics.Blit(_target, previousFrame);
+
+            RenderTexture currentFrame = RenderTexture.GetTemporary(Screen.width, Screen.height, 0, GraphicsFormat.R32G32B32A32_SFloat);
+            currentFrame.enableRandomWrite = true;
+            currentFrame.Create();
+            RayTracingShader.SetInt("frame", numRenderedFrames);
+            RayTracingShader.SetTexture(0, "Result", currentFrame);
+            RayTracingShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+
+            AccumulationShader.SetInt("frame", numRenderedFrames);
+            AccumulationShader.SetTexture(0, "_PreviousFrame", previousFrame);
+            AccumulationShader.SetTexture(0, "Result", currentFrame);
+            AccumulationShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+            Graphics.Blit(currentFrame, _target);
+
+            Graphics.Blit(_target, destination);
+
+            RenderTexture.ReleaseTemporary(previousFrame);
+            RenderTexture.ReleaseTemporary(currentFrame);
+
+            if (Application.isPlaying)
+            {
+                numRenderedFrames += 1;
+            }
+        }
+        else
+        {
+            if (_target != null)
+            {
+                _target.Release();
+            }
+        
+            // Set the target and dispatch the compute shader
+            // One thread per pixel, 1 group per 8x8 pixel
+            RayTracingShader.SetTexture(0, "Result", _target);
+            RayTracingShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
+
+            // Send it to the camera
+            Graphics.Blit(_target, destination);
+        }
     }
     
     // OnRenderImage is automatically called by Unity when camera has finished rendering

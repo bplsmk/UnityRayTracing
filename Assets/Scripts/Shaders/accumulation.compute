@@ -1,10 +1,15 @@
 #pragma kernel CSMain
 
 RWTexture2D<float4> Result;
+RWTexture2D<float4> _PreviousFrame;
+int frame;
 
 [numthreads(8,8,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
 {
+    float4 color = Result[id.xy];
+    float4 prevColor = _PreviousFrame[id.xy];
+    float weight = 1.0f / (frame + 1);
 
-    Result[id.xy] = float4(id.x & id.y, (id.x & 15)/15.0, (id.y & 15)/15.0, 0.0);
+    Result[id.xy] = saturate(prevColor * (1 - weight) + color * weight);
 }
