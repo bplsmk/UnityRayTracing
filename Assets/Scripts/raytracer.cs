@@ -176,54 +176,34 @@ public class raytracer : MonoBehaviour
         // Create the initial frame
         InitRenderTexture();
 
-        int threadGroupsX = Mathf.CeilToInt(Screen.width / 8.0f);
-        int threadGroupsY = Mathf.CeilToInt(Screen.height / 8.0f);
+        // Create a copy of previous frame
+        RenderTexture previousFrame = RenderTexture.GetTemporary(Screen.width, Screen.height, 0, GraphicsFormat.R32G32B32A32_SFloat);
+        previousFrame.enableRandomWrite = true;
+        previousFrame.Create();
+        Graphics.Blit(_target, previousFrame);
 
-        if(Accumulate == true)
+        RenderTexture currentFrame = RenderTexture.GetTemporary(Screen.width, Screen.height, 0, GraphicsFormat.R32G32B32A32_SFloat);
+        currentFrame.enableRandomWrite = true;
+        currentFrame.Create();
+        RayTracingShader.SetInt("frame", numRenderedFrames);
+        RayTracingShader.SetTexture(0, "Result", currentFrame);
+        RayTracingShader.Dispatch(0, Screen.width / 8, Screen.height / 8, 1);
+
+        AccumulationShader.SetInt("frame", numRenderedFrames);
+        AccumulationShader.SetBool("accumulate", Accumulate);
+        AccumulationShader.SetTexture(0, "_PreviousFrame", previousFrame);
+        AccumulationShader.SetTexture(0, "Result", currentFrame);
+        AccumulationShader.Dispatch(0, Screen.width / 8, Screen.height / 8, 1);
+        Graphics.Blit(currentFrame, _target);
+
+        Graphics.Blit(_target, destination);
+
+        RenderTexture.ReleaseTemporary(previousFrame);
+        RenderTexture.ReleaseTemporary(currentFrame);
+
+        if (Application.isPlaying)
         {
-            // Create a copy of previous frame
-            RenderTexture previousFrame = RenderTexture.GetTemporary(Screen.width, Screen.height, 0, GraphicsFormat.R32G32B32A32_SFloat);
-            previousFrame.enableRandomWrite = true;
-            previousFrame.Create();
-            Graphics.Blit(_target, previousFrame);
-
-            RenderTexture currentFrame = RenderTexture.GetTemporary(Screen.width, Screen.height, 0, GraphicsFormat.R32G32B32A32_SFloat);
-            currentFrame.enableRandomWrite = true;
-            currentFrame.Create();
-            RayTracingShader.SetInt("frame", numRenderedFrames);
-            RayTracingShader.SetTexture(0, "Result", currentFrame);
-            RayTracingShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
-
-            AccumulationShader.SetInt("frame", numRenderedFrames);
-            AccumulationShader.SetTexture(0, "_PreviousFrame", previousFrame);
-            AccumulationShader.SetTexture(0, "Result", currentFrame);
-            AccumulationShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
-            Graphics.Blit(currentFrame, _target);
-
-            Graphics.Blit(_target, destination);
-
-            RenderTexture.ReleaseTemporary(previousFrame);
-            RenderTexture.ReleaseTemporary(currentFrame);
-
-            if (Application.isPlaying)
-            {
-                numRenderedFrames += 1;
-            }
-        }
-        else
-        {
-            if (_target != null)
-            {
-                _target.Release();
-            }
-        
-            // Set the target and dispatch the compute shader
-            // One thread per pixel, 1 group per 8x8 pixel
-            RayTracingShader.SetTexture(0, "Result", _target);
-            RayTracingShader.Dispatch(0, threadGroupsX, threadGroupsY, 1);
-
-            // Send it to the camera
-            Graphics.Blit(_target, destination);
+            numRenderedFrames += 1;
         }
     }
     
