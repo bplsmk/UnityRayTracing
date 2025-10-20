@@ -182,6 +182,7 @@ public class raytracer : MonoBehaviour
         previousFrame.Create();
         Graphics.Blit(_target, previousFrame);
 
+        // Raytrace the copy frame
         RenderTexture currentFrame = RenderTexture.GetTemporary(Screen.width, Screen.height, 0, GraphicsFormat.R32G32B32A32_SFloat);
         currentFrame.enableRandomWrite = true;
         currentFrame.Create();
@@ -189,6 +190,7 @@ public class raytracer : MonoBehaviour
         RayTracingShader.SetTexture(0, "Result", currentFrame);
         RayTracingShader.Dispatch(0, Screen.width / 8, Screen.height / 8, 1);
 
+        // Accumulate the previous frame with the current frame
         AccumulationShader.SetInt("frame", numRenderedFrames);
         AccumulationShader.SetBool("accumulate", Accumulate);
         AccumulationShader.SetTexture(0, "_PreviousFrame", previousFrame);
@@ -196,6 +198,7 @@ public class raytracer : MonoBehaviour
         AccumulationShader.Dispatch(0, Screen.width / 8, Screen.height / 8, 1);
         Graphics.Blit(currentFrame, _target);
 
+        // Present it to the screen and release the temporary frames
         Graphics.Blit(_target, destination);
 
         RenderTexture.ReleaseTemporary(previousFrame);
