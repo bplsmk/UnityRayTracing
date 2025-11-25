@@ -25,6 +25,8 @@ public class raytracer : MonoBehaviour
     private ComputeBuffer _meshObjectBuffer;
     private ComputeBuffer _vertexBuffer;
     private ComputeBuffer _indexBuffer;
+    private ComputeBuffer _triangleBuffer;
+    private ComputeBuffer _nodeBuffer;
 
     struct MeshObject
     {
@@ -87,6 +89,13 @@ public class raytracer : MonoBehaviour
             var indices = mesh.GetIndices(0);
             _indices.AddRange(indices.Select(index => index + firstVertex));
 
+            BVH bvh = new(mesh.vertices, mesh.GetIndices(0));
+            List<BVH.Node> nodes = new();
+            nodes.AddRange(bvh.GetNodeList());
+
+            CreateComputeStructBuffer(ref _triangleBuffer, bvh.BVHTriangles);
+            CreateComputeListBuffer(ref _nodeBuffer, nodes);
+
             // Add the object itself
             _meshObjects.Add(new MeshObject()
             {
@@ -97,14 +106,15 @@ public class raytracer : MonoBehaviour
             });
         }
 
-        CreateComputeBuffer(ref _meshObjectBuffer, _meshObjects, 92);
-        CreateComputeBuffer(ref _vertexBuffer, _vertices, 12);
-        CreateComputeBuffer(ref _indexBuffer, _indices, 4);
+        CreateComputeListBuffer(ref _meshObjectBuffer, _meshObjects);
+        CreateComputeListBuffer(ref _vertexBuffer, _vertices);
+        CreateComputeListBuffer(ref _indexBuffer, _indices);
     }
 
-    private static void CreateComputeBuffer<T>(ref ComputeBuffer buffer, List<T> data, int stride)
-        where T : struct
+    private static void CreateComputeListBuffer<T>(ref ComputeBuffer buffer, List<T> data) where T : struct
     {
+        int stride = System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
+
         if (buffer != null)
         {
             // If no data or buffer doesn't match the given criteria, release it
@@ -126,6 +136,23 @@ public class raytracer : MonoBehaviour
         }
     }
 
+    private static void CreateComputeStructBuffer<T>(ref ComputeBuffer buffer, T[] data) where T : struct
+    {
+        int stride = System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
+
+        if (buffer == null || buffer.count != data.Length || buffer.stride != stride)
+        {
+            if (buffer != null)
+            {
+                buffer.Release();
+            }
+
+            buffer = new ComputeBuffer(data.Length, stride);
+        }
+
+        buffer.SetData(data);
+    }
+
     private void SetComputeBuffer(string name, ComputeBuffer buffer)
     {
         if (buffer != null)
@@ -145,6 +172,8 @@ public class raytracer : MonoBehaviour
         SetComputeBuffer("_MeshObjects", _meshObjectBuffer);
         SetComputeBuffer("_Vertices", _vertexBuffer);
         SetComputeBuffer("_Indices", _indexBuffer);
+        SetComputeBuffer("_triangleBuffer", _triangleBuffer);
+        SetComputeBuffer("_nodeBuffer", _nodeBuffer);
     }
 
     void Update()
