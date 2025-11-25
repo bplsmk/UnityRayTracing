@@ -20,9 +20,11 @@ public class raytracer : MonoBehaviour
     private static bool _meshObjectsNeedRebuilding = false;
     private static List<raytracingobject> _rayTracingObjects = new List<raytracingobject>();
     private static List<MeshObject> _meshObjects = new List<MeshObject>();
+    private static List<Vector2> _uvs = new List<Vector2>();
     private static List<Vector3> _vertices = new List<Vector3>();
     private static List<int> _indices = new List<int>();
     private ComputeBuffer _meshObjectBuffer;
+    private ComputeBuffer _uvsBuffer;
     private ComputeBuffer _vertexBuffer;
     private ComputeBuffer _indexBuffer;
 
@@ -31,7 +33,8 @@ public class raytracer : MonoBehaviour
         public Matrix4x4 localToWorldMatrix;
         public int indices_offset;
         public int indices_count;
-        public RTmaterial material;
+        public Vector4 emissionColor;
+        public float emissionStrength;
     }
 
     private void Awake()
@@ -42,6 +45,7 @@ public class raytracer : MonoBehaviour
     private void OnDisable()
     {
         _meshObjectBuffer?.Release();
+        _uvsBuffer?.Release();
         _vertexBuffer?.Release();
         _indexBuffer?.Release();
     }
@@ -69,13 +73,29 @@ public class raytracer : MonoBehaviour
 
         // Clear all lists
         _meshObjects.Clear();
+        _uvs.Clear();
         _vertices.Clear();
         _indices.Clear();
+
+        int count = 0;
+        RenderTexture textureArray = new RenderTexture(512, 512, 0, GraphicsFormat.R32G32B32A32_SFloat);
+        textureArray.dimension = UnityEngine.Rendering.TextureDimension.Tex2DArray;
+        textureArray.volumeDepth = _rayTracingObjects.Count;
+        textureArray.enableRandomWrite = true;
+        textureArray.Create();
 
         // Loop over all objects and gather their data
         foreach (raytracingobject obj in _rayTracingObjects)
         {
             Mesh mesh = obj.GetComponent<MeshFilter>().sharedMesh;
+
+            // Send texture data to GPU
+            Material mat = obj.GetComponent<MeshRenderer>().material;
+            Texture tex = mat.GetTexture("_MainTex");
+            Graphics.CopyTexture(tex, 0, 0, textureArray, count, 0);
+
+            // Add UV data
+            _uvs.AddRange(mesh.uv);
 
             // Add vertex data
             int firstVertex = _vertices.Count;
@@ -93,18 +113,26 @@ public class raytracer : MonoBehaviour
                 localToWorldMatrix = obj.transform.localToWorldMatrix,
                 indices_offset = firstIndex,
                 indices_count = indices.Length,
-                material = obj.material
+                emissionColor = obj.emissionColor,
+                emissionStrength = obj.emissionStrength
             });
+
+            count += 1;
         }
 
-        CreateComputeBuffer(ref _meshObjectBuffer, _meshObjects, 92);
-        CreateComputeBuffer(ref _vertexBuffer, _vertices, 12);
-        CreateComputeBuffer(ref _indexBuffer, _indices, 4);
+        RayTracingShader.SetTexture(0, "TextureArray", textureArray);
+
+        CreateComputeBuffer(ref _meshObjectBuffer, _meshObjects);
+        CreateComputeBuffer(ref _uvsBuffer, _uvs);
+        CreateComputeBuffer(ref _vertexBuffer, _vertices);
+        CreateComputeBuffer(ref _indexBuffer, _indices);
     }
 
-    private static void CreateComputeBuffer<T>(ref ComputeBuffer buffer, List<T> data, int stride)
+    private static void CreateComputeBuffer<T>(ref ComputeBuffer buffer, List<T> data)
         where T : struct
     {
+        int stride = System.Runtime.InteropServices.Marshal.SizeOf(typeof(T));
+
         if (buffer != null)
         {
             // If no data or buffer doesn't match the given criteria, release it
@@ -140,9 +168,10 @@ public class raytracer : MonoBehaviour
         RayTracingShader.SetInt("MaxBounceCount", maxBounceCount);
 
         RayTracingShader.SetMatrix("_CameraToWorld", _camera.cameraToWorldMatrix);
-        RayTracingShader.SetMatrix("_CameraInverseProjection", _camera.projectionMatrix.inverse);
+        RayTracingShader.SetMatrix("_CameraInverseProjection", _camera.projectionMatrix.inverse);        
 
         SetComputeBuffer("_MeshObjects", _meshObjectBuffer);
+        SetComputeBuffer("_UVs", _uvsBuffer);
         SetComputeBuffer("_Vertices", _vertexBuffer);
         SetComputeBuffer("_Indices", _indexBuffer);
     }

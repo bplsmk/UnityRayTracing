@@ -1,6 +1,7 @@
 #pragma kernel CSMain
 
 RWTexture2D<float4> Result;
+RWTexture2DArray<float4> TextureArray;
 
 float4x4 _CameraToWorld;
 float4x4 _CameraInverseProjection;
@@ -43,24 +44,18 @@ float3 RandomDirection(inout uint rngSeed)
 }
 
 //-------------------------------------
-// MATERIALS
-struct RTmaterial
-{
-    float emissionStrength;
-    float4 emissionColor;
-};
-
-//-------------------------------------
 // MESHES
 struct MeshObject
 {
     float4x4 localToWorldMatrix;
     int indices_offset;
     int indices_count;
-    RTmaterial emission;
+    float4 emissionColor;
+    float emissionStrength;
 };
 
 StructuredBuffer<MeshObject> _MeshObjects;
+StructuredBuffer<float2> _UVs;
 StructuredBuffer<float3> _Vertices;
 StructuredBuffer<int> _Indices;
 
@@ -78,7 +73,9 @@ struct HitInfo
     float3 position;
     float distance;
     float3 normal;
-    RTmaterial emission;
+    float4 emissionColor;
+    float4 emissionStrength;
+    float3 color;
 };
 
 Ray CreateRay(float3 origin, float3 direction)
@@ -96,7 +93,9 @@ HitInfo CreateRayHit()
     hitInfo.position = float3(0.0f, 0.0f, 0.0f);
     hitInfo.distance = 1.#INF;
     hitInfo.normal = float3(0.0f, 0.0f, 0.0f);
-    hitInfo.emission = (RTmaterial)0;
+    hitInfo.emissionColor = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    hitInfo.emissionStrength = float(0.0f);
+    hitInfo.color = float3(0.0f, 0.0f, 0.0f);
     return hitInfo;
 }
 
@@ -124,41 +123,50 @@ bool IntersectTriangle_MT97(Ray ray, float3 vert0, float3 vert1, float3 vert2,
 
     float3 edge1 = vert1 - vert0;
     float3 edge2 = vert2 - vert0;
+    float3 norm = cross(edge1, edge2);
+    float3 ao = ray.origin - vert0;
 
-    float3 pvec = cross(ray.direction, edge2);
+    float3 dao = cross(ao, ray.direction);
 
-    float det = dot(edge1, pvec);
-
-    if (det < EPSILON)
+    float determinant = -dot(ray.direction, norm);
+    if (determinant < EPSILON)
+    {
         return false;
-    float inv_det = 1.0f / det;
+    }
 
-    float3 tvec = ray.origin - vert0;
+    float invdet = 1 / determinant;
 
-    u = dot(tvec, pvec) * inv_det;
+    t = dot(ao, norm) * invdet;
+
+    u = dot(edge2, dao) * invdet;
     if (u < 0.0 || u > 1.0f)
+    {
         return false;
+    }
 
-    float3 qvec = cross(tvec, edge1);
-
-    v = dot(ray.direction, qvec) * inv_det;
+    v = -dot(edge1, dao) * invdet;
     if (v < 0.0 || u + v > 1.0f)
+    {
         return false;
-
-    t = dot(edge2, qvec) * inv_det;
+    }
 
     return true;
 }
 
-void IntersectMeshObject(Ray ray, inout HitInfo hitInfo, MeshObject meshObject)
+void IntersectMeshObject(Ray ray, inout HitInfo hitInfo, MeshObject meshObject, int index)
 {
     uint offset = meshObject.indices_offset;
     uint count = offset + meshObject.indices_count;
+    uint uvindex = 0;
     for (uint i = offset; i < count; i += 3)
     {
         float3 v0 = (mul(meshObject.localToWorldMatrix, float4(_Vertices[_Indices[i]], 1))).xyz;
         float3 v1 = (mul(meshObject.localToWorldMatrix, float4(_Vertices[_Indices[i + 1]], 1))).xyz;
         float3 v2 = (mul(meshObject.localToWorldMatrix, float4(_Vertices[_Indices[i + 2]], 1))).xyz;
+
+        float2 uv0 = (_UVs[_Indices[i]]);
+        float2 uv1 = (_UVs[_Indices[i + 1]]);
+        float2 uv2 = (_UVs[_Indices[i + 2]]);
 
         float t, u, v;
         if (IntersectTriangle_MT97(ray, v0, v1, v2, t, u, v))
@@ -168,9 +176,13 @@ void IntersectMeshObject(Ray ray, inout HitInfo hitInfo, MeshObject meshObject)
                 hitInfo.distance = t;
                 hitInfo.position = ray.origin + t * ray.direction;
                 hitInfo.normal = normalize(cross(v1 - v0, v2 - v0));
-                hitInfo.emission = meshObject.emission;
+                hitInfo.emissionColor = meshObject.emissionColor;
+                hitInfo.emissionStrength = meshObject.emissionStrength;
+                float2 uv = ((1 - u - v) * uv0) + (u * uv1) + (v * uv2);
+                hitInfo.color = TextureArray.Load(uint3(uv * 512, index));
             }
         }
+        uvindex += 3;
     }
 }
 
@@ -185,7 +197,7 @@ HitInfo Trace(Ray ray)
     _MeshObjects.GetDimensions(count, stride);
     for (i = 0; i < count; i++)
     {
-        IntersectMeshObject(ray, bestHit, _MeshObjects[i]);
+        IntersectMeshObject(ray, bestHit, _MeshObjects[i], i);
     }
     
     return bestHit;
@@ -220,21 +232,20 @@ void CSMain (uint3 id : SV_DispatchThreadID)
         HitInfo hitInfo = Trace(ray);
         if (hitInfo.distance < 1.#INF)
         {
-            // Grab the incoming light if it bounces from an object with emission values
-            float3 incomingLight = hitInfo.emission.emissionColor.gba;
+            float3 incomingLight = hitInfo.emissionColor.rgb * hitInfo.emissionStrength;
 
-            // Bounce the ray and multiply the light with object color (right now its just white)
             ray.origin = hitInfo.position + hitInfo.normal * 0.001f;
             ray.direction = normalize(hitInfo.normal + RandomDirection(rngSeed));
-            result += incomingLight * ray.color;
-            ray.color *= float3(1.0f, 1.0f, 1.0f);
+            result += ray.color * incomingLight;
+            ray.color *= hitInfo.color;
         }
         else
         {
-            // It hit nothing so delete the ray's color
+            // It hit nothing so delete the ray's color (change this to skybox eventually)
             ray.color = float3(0.0f, 0.0f, 0.0f);
             break;
         }
     }
+
     Result[id.xy] = float4(result, 1);
 }
