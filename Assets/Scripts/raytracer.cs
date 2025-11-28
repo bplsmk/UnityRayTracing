@@ -11,6 +11,15 @@ public class raytracer : MonoBehaviour
 
     [Header("Info")]
 	[SerializeField] int numRenderedFrames;
+    
+    [Header("Anti-Aliasing")]
+    [SerializeField, Range(1, 4)] int SSAA = 1; // 1 = off, 2 = 2x SSAA, 4 = 4x SSAA
+
+    [Header("Controls")]
+    [Tooltip("Mouse button index to toggle the raytracer (0=left,1=right,2=middle)")]
+    [SerializeField] int toggleMouseButton = 1;
+    [Tooltip("Enable/disable ray tracing. Toggle at runtime with the configured mouse button.")]
+    [SerializeField] bool RayTracingEnabled = true;
 
     public ComputeShader RayTracingShader;
     public ComputeShader AccumulationShader;
@@ -25,6 +34,7 @@ public class raytracer : MonoBehaviour
     private ComputeBuffer _meshObjectBuffer;
     private ComputeBuffer _vertexBuffer;
     private ComputeBuffer _indexBuffer;
+    
 
     struct MeshObject
     {
@@ -128,7 +138,7 @@ public class raytracer : MonoBehaviour
 
     private void SetComputeBuffer(string name, ComputeBuffer buffer)
     {
-        if (buffer != null)
+        if (buffer != null && RayTracingShader != null)
         {
             RayTracingShader.SetBuffer(0, name, buffer);
         }
@@ -158,6 +168,20 @@ public class raytracer : MonoBehaviour
                 obj.transform.hasChanged = false;
             }
         }
+        
+        // Toggle raytracing on/off with configured mouse button
+        if (Input.GetMouseButtonDown(toggleMouseButton))
+        {
+            RayTracingEnabled = !RayTracingEnabled;
+            // Reset accumulation when toggling back on
+            if (RayTracingEnabled)
+            {
+                numRenderedFrames = 0;
+                // force a rebuild so buffers are up-to-date when re-enabled
+                _meshObjectsNeedRebuilding = true;
+            }
+        }
+
     }
 
     private void InitRenderTexture()
@@ -176,26 +200,38 @@ public class raytracer : MonoBehaviour
         // Create the initial frame
         InitRenderTexture();
 
-        // Create a copy of previous frame
-        RenderTexture previousFrame = RenderTexture.GetTemporary(Screen.width, Screen.height, 0, GraphicsFormat.R32G32B32A32_SFloat);
+        // Determine render resolution for SSAA (render at higher resolution and downsample)
+        int rtWidth = Screen.width * Mathf.Max(1, SSAA);
+        int rtHeight = Screen.height * Mathf.Max(1, SSAA);
+
+        // Create a copy of previous frame at the SSAA resolution (we'll blit the screen-sized _target into this, Unity will scale)
+        RenderTexture previousFrame = RenderTexture.GetTemporary(rtWidth, rtHeight, 0, GraphicsFormat.R32G32B32A32_SFloat);
         previousFrame.enableRandomWrite = true;
         previousFrame.Create();
         Graphics.Blit(_target, previousFrame);
 
-        // Raytrace the copy frame
-        RenderTexture currentFrame = RenderTexture.GetTemporary(Screen.width, Screen.height, 0, GraphicsFormat.R32G32B32A32_SFloat);
+        // Raytrace into a higher-resolution currentFrame
+        RenderTexture currentFrame = RenderTexture.GetTemporary(rtWidth, rtHeight, 0, GraphicsFormat.R32G32B32A32_SFloat);
         currentFrame.enableRandomWrite = true;
         currentFrame.Create();
         RayTracingShader.SetInt("frame", numRenderedFrames);
+        // Pass per-pixel sample count to the compute shader
         RayTracingShader.SetTexture(0, "Result", currentFrame);
-        RayTracingShader.Dispatch(0, Screen.width / 8, Screen.height / 8, 1);
 
-        // Accumulate the previous frame with the current frame
+        // Dispatch with ceil division to ensure full coverage even if dimensions not divisible by 8
+        int threadGroupX = Mathf.CeilToInt((float)rtWidth / 8.0f);
+        int threadGroupY = Mathf.CeilToInt((float)rtHeight / 8.0f);
+        RayTracingShader.Dispatch(0, threadGroupX, threadGroupY, 1);
+
+
+        // Accumulate the previous frame with the current frame (both at SSAA resolution)
         AccumulationShader.SetInt("frame", numRenderedFrames);
         AccumulationShader.SetBool("accumulate", Accumulate);
         AccumulationShader.SetTexture(0, "_PreviousFrame", previousFrame);
         AccumulationShader.SetTexture(0, "Result", currentFrame);
-        AccumulationShader.Dispatch(0, Screen.width / 8, Screen.height / 8, 1);
+        AccumulationShader.Dispatch(0, threadGroupX, threadGroupY, 1);
+
+        // Downsample the high-res currentFrame to the screen-sized _target (this achieves SSAA)
         Graphics.Blit(currentFrame, _target);
 
         // Present it to the screen and release the temporary frames
@@ -213,6 +249,15 @@ public class raytracer : MonoBehaviour
     // OnRenderImage is automatically called by Unity when camera has finished rendering
     private void OnRenderImage(RenderTexture source, RenderTexture destination)
     {
+        // If raytracing is disabled or shaders aren't assigned, just blit the
+        // camera image through and skip the raytracing code to avoid null
+        // buffer/shader errors.
+        if (!RayTracingEnabled || RayTracingShader == null || AccumulationShader == null)
+        {
+            Graphics.Blit(source, destination);
+            return;
+        }
+
         RebuildMeshObjectBuffers();
         SetShaderParameters();
         Render(destination);
