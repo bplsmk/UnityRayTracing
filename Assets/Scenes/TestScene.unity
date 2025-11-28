@@ -529,8 +529,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c0d28f125fad3a5458e041147bdaba00, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::raytracingobject
-  emissionColor: {r: 0, g: 0, b: 0, a: 0}
-  emissionStrength: 20
+  emissionColor: {r: 0.6974788, g: 0, b: 1, a: 0}
+  emissionStrength: 6.91
 --- !u!136 &684473205
 CapsuleCollider:
   m_ObjectHideFlags: 0
@@ -1259,8 +1259,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c0d28f125fad3a5458e041147bdaba00, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::raytracingobject
-  emissionColor: {r: 0, g: 0, b: 0, a: 0}
-  emissionStrength: 0
+  emissionColor: {r: 0.17590779, g: 0.5566038, b: 0.36655024, a: 0}
+  emissionStrength: 5.48
 --- !u!65 &1219183518
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -1385,7 +1385,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::raytracer
   maxBounceCount: 4
-  Accumulate: 0
+  Accumulate: 1
   numRenderedFrames: 0
   RayTracingShader: {fileID: 7200000, guid: 8585c1e516f766e47aa5d89cb1702a84, type: 3}
   AccumulationShader: {fileID: 7200000, guid: 88525a9b4ebc2bf408da258dbd8dec1a, type: 3}

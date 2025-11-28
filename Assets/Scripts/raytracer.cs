@@ -8,9 +8,7 @@ public class raytracer : MonoBehaviour
     [Header("Ray Tracing Settings")]
     [SerializeField, Range(0, 32)] int maxBounceCount = 4;
     [SerializeField] bool Accumulate;
-
-    [Header("Info")]
-	[SerializeField] int numRenderedFrames;
+    [SerializeField] bool showFPSInGame;
 
     public ComputeShader RayTracingShader;
     public ComputeShader AccumulationShader;
@@ -27,6 +25,7 @@ public class raytracer : MonoBehaviour
     private ComputeBuffer _uvsBuffer;
     private ComputeBuffer _vertexBuffer;
     private ComputeBuffer _indexBuffer;
+    int numRenderedFrames;
 
     struct MeshObject
     {
@@ -236,6 +235,14 @@ public class raytracer : MonoBehaviour
         if (Application.isPlaying)
         {
             numRenderedFrames += 1;
+        }
+    }
+
+    void OnGUI()
+    {
+        if (showFPSInGame)
+        {
+            GUILayout.TextField("FPS: " + ((int)(1f / Time.unscaledDeltaTime)).ToString());
         }
     }
     
