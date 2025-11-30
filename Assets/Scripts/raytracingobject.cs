@@ -6,7 +6,8 @@ using System.Collections.Generic;
 [RequireComponent(typeof(MeshFilter))]
 public class raytracingobject : MonoBehaviour
 {
-    public RTmaterial material;
+    public Color emissionColor;
+    public float emissionStrength;
 
     private void OnEnable()
     {
